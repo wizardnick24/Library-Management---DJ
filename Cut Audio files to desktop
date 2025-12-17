@@ -1,0 +1,106 @@
+#include <windows.h>
+#include <shlobj.h>
+#include <filesystem>
+#include <iostream>
+#include <vector>
+#include <unordered_set>
+#include <algorithm>
+
+namespace fs = std::filesystem;
+
+// Supported audio formats
+const std::unordered_set<std::wstring> AUDIO_EXTENSIONS = {
+    L".wav", L".flac", L".mp3", L".m4a", L".aiff", L".aif", L".aac"
+};
+
+// Desktop path
+fs::path getDesktopPath() {
+    PWSTR path = nullptr;
+    SHGetKnownFolderPath(FOLDERID_Desktop, 0, nullptr, &path);
+    fs::path desktop(path);
+    CoTaskMemFree(path);
+    return desktop;
+}
+
+// All mounted drives / partitions
+std::vector<fs::path> getAllDrives() {
+    std::vector<fs::path> drives;
+    DWORD mask = GetLogicalDrives();
+
+    for (wchar_t c = L'A'; c <= L'Z'; ++c) {
+        if (mask & 1) {
+            drives.emplace_back(std::wstring{c} + L":\\");
+        }
+        mask >>= 1;
+    }
+    return drives;
+}
+
+// Extension check
+bool isAudioFile(const fs::path& p) {
+    auto ext = p.extension().wstring();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+    return AUDIO_EXTENSIONS.contains(ext);
+}
+
+// Safe move (rename → fallback copy+delete)
+bool moveFileSafe(const fs::path& src, const fs::path& dst) {
+    try {
+        fs::rename(src, dst); // fast path (same drive)
+        return true;
+    } catch (...) {
+        try {
+            fs::copy_file(src, dst, fs::copy_options::skip_existing);
+            fs::remove(src);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+}
+
+int wmain() {
+    fs::path targetDir = getDesktopPath() / "Entire library";
+    fs::create_directories(targetDir);
+
+    auto drives = getAllDrives();
+    size_t moved = 0;
+
+    for (const auto& drive : drives) {
+        try {
+            for (auto it = fs::recursive_directory_iterator(
+                     drive,
+                     fs::directory_options::skip_permission_denied);
+                 it != fs::recursive_directory_iterator();
+                 ++it)
+            {
+                try {
+                    if (!it->is_regular_file()) continue;
+                    if (!isAudioFile(it->path())) continue;
+
+                    fs::path dest = targetDir / it->path().filename();
+
+                    // Handle name collisions
+                    int suffix = 1;
+                    while (fs::exists(dest)) {
+                        dest = targetDir /
+                               (it->path().stem().wstring() +
+                                L"_dup" + std::to_wstring(suffix++) +
+                                it->path().extension().wstring());
+                    }
+
+                    if (moveFileSafe(it->path(), dest)) {
+                        ++moved;
+                    }
+                } catch (...) {
+                    // Ignore unreadable files
+                }
+            }
+        } catch (...) {
+            // Ignore inaccessible drives
+        }
+    }
+
+    std::wcout << L"Completed. Files moved: " << moved << std::endl;
+    return 0;
+}
