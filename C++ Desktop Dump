@@ -1,0 +1,92 @@
+#include <windows.h>
+#include <shlobj.h>
+#include <filesystem>
+#include <iostream>
+#include <vector>
+#include <unordered_set>
+
+namespace fs = std::filesystem;
+
+// Supported audio extensions
+const std::unordered_set<std::wstring> AUDIO_EXTENSIONS = {
+    L".wav", L".flac", L".mp3", L".m4a", L".aiff", L".aif", L".aac"
+};
+
+// Get Desktop path
+fs::path getDesktopPath() {
+    PWSTR path = nullptr;
+    SHGetKnownFolderPath(FOLDERID_Desktop, 0, nullptr, &path);
+    fs::path desktop(path);
+    CoTaskMemFree(path);
+    return desktop;
+}
+
+// Enumerate all logical drives (including partitions)
+std::vector<fs::path> getAllDrives() {
+    std::vector<fs::path> drives;
+    DWORD mask = GetLogicalDrives();
+
+    for (wchar_t letter = L'A'; letter <= L'Z'; ++letter) {
+        if (mask & 1) {
+            std::wstring drive = { letter, L':', L'\\' };
+            drives.emplace_back(drive);
+        }
+        mask >>= 1;
+    }
+    return drives;
+}
+
+// Case-insensitive extension check
+bool isAudioFile(const fs::path& file) {
+    auto ext = file.extension().wstring();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+    return AUDIO_EXTENSIONS.contains(ext);
+}
+
+int wmain() {
+    fs::path outputDir = getDesktopPath() / "Entire library";
+    fs::create_directories(outputDir);
+
+    auto drives = getAllDrives();
+    size_t copiedCount = 0;
+
+    for (const auto& drive : drives) {
+        try {
+            for (auto it = fs::recursive_directory_iterator(
+                     drive,
+                     fs::directory_options::skip_permission_denied);
+                 it != fs::recursive_directory_iterator();
+                 ++it)
+            {
+                try {
+                    if (it->is_regular_file() && isAudioFile(it->path())) {
+                        fs::path dest = outputDir / it->path().filename();
+
+                        // Prevent overwrite collisions
+                        if (fs::exists(dest)) {
+                            dest = outputDir /
+                                   (it->path().stem().wstring() + L"_dup" +
+                                    it->path().extension().wstring());
+                        }
+
+                        fs::copy_file(
+                            it->path(),
+                            dest,
+                            fs::copy_options::skip_existing);
+
+                        ++copiedCount;
+                    }
+                }
+                catch (...) {
+                    // Skip unreadable files silently
+                }
+            }
+        }
+        catch (...) {
+            // Skip inaccessible drives
+        }
+    }
+
+    std::wcout << L"Completed. Files copied: " << copiedCount << std::endl;
+    return 0;
+}
