@@ -1,0 +1,76 @@
+#include <filesystem>
+#include <iostream>
+#include <unordered_map>
+#include <string>
+#include <algorithm>
+
+#include <taglib/fileref.h>
+#include <taglib/audioproperties.h>
+
+namespace fs = std::filesystem;
+
+// Normalize filename
+std::wstring normalizeName(const std::wstring& s) {
+    std::wstring out = s;
+    std::transform(out.begin(), out.end(), out.begin(), ::towlower);
+    return out;
+}
+
+// Build a unique key: name | ext | size | duration
+std::wstring buildKey(const fs::path& p) {
+    auto size = fs::file_size(p);
+
+    TagLib::FileRef f(p.string().c_str());
+    int duration = 0;
+    if (!f.isNull() && f.audioProperties()) {
+        duration = f.audioProperties()->length();
+    }
+
+    std::wstring key =
+        normalizeName(p.filename().wstring()) + L"|" +
+        normalizeName(p.extension().wstring()) + L"|" +
+        std::to_wstring(size) + L"|" +
+        std::to_wstring(duration);
+
+    return key;
+}
+
+int wmain() {
+    fs::path root =
+        fs::path(std::getenv("USERPROFILE")) /
+        "Desktop" / "Entire library";
+
+    if (!fs::exists(root)) {
+        std::wcerr << L"Entire library folder not found.\n";
+        return 1;
+    }
+
+    std::unordered_map<std::wstring, fs::path> seen;
+    size_t deleted = 0;
+
+    for (auto& entry : fs::recursive_directory_iterator(
+             root, fs::directory_options::skip_permission_denied))
+    {
+        if (!entry.is_regular_file()) continue;
+
+        try {
+            std::wstring key = buildKey(entry.path());
+
+            auto it = seen.find(key);
+            if (it == seen.end()) {
+                seen[key] = entry.path();
+            } else {
+                fs::remove(entry.path());
+                ++deleted;
+                std::wcout << L"Deleted duplicate: "
+                           << entry.path().filename() << std::endl;
+            }
+        }
+        catch (...) {
+            // Skip unreadable files
+        }
+    }
+
+    std::wcout << L"\nDone. Files deleted: " << deleted << std::endl;
+    return 0;
+}
