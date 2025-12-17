@@ -1,0 +1,163 @@
+1️⃣ Install Required Software
+✅ Install Visual Studio Build Tools
+
+Download:
+https://visualstudio.microsoft.com/downloads/
+
+Select:
+
+✔ Desktop development with C++
+
+✔ MSVC v143 (or latest)
+
+✔ Windows 10/11 SDK
+
+You do NOT need the full Visual Studio IDE.
+
+✅ Install Visual Studio Code
+
+https://code.visualstudio.com/
+
+✅ Install VS Code Extensions
+
+In VS Code → Extensions:
+
+C/C++ (Microsoft)
+
+C/C++ Extension Pack (optional)
+
+2️⃣ Open Developer Command Prompt
+
+⚠️ This step is mandatory
+
+From Start Menu:
+
+Developer Command Prompt for VS 2022
+
+
+This sets all compiler paths correctly.
+
+3️⃣ Launch VS Code From That Prompt
+code .
+
+
+This ensures cl.exe works inside VS Code’s terminal.
+
+4️⃣ Create Your C++ File
+
+Example:
+
+dedupe.cpp
+
+
+Paste the program inside and save.
+
+5️⃣ Compile (MSVC)
+Basic compile (no external libraries)
+cl /std:c++17 dedupe.cpp
+
+Compile with TagLib
+cl /std:c++17 dedupe.cpp ^
+/I C:\vcpkg\installed\x64-windows\include ^
+/link /LIBPATH:C:\vcpkg\installed\x64-windows\lib tag.lib
+
+Compile with libFLAC
+cl /std:c++17 flac_to_wav.cpp ^
+/I C:\vcpkg\installed\x64-windows\include ^
+/link /LIBPATH:C:\vcpkg\installed\x64-windows\lib flac.lib
+
+6️⃣ Run the Program
+dedupe.exe
+
+7️⃣ Common Errors & Fixes
+❌ 'cl' is not recognized
+
+You did not open the Developer Command Prompt.
+
+❌ cannot open include file: taglib/fileref.h
+
+TagLib not installed
+
+Wrong vcpkg path
+
+Verify:
+
+dir C:\vcpkg\installed\x64-windows\include\taglib
+
+❌ LNK1104: cannot open file 'tag.lib'
+
+You forgot:
+
+/link /LIBPATH:...
+
+OPTION B: MinGW + VS Code (Alternative)
+
+Only use this if you cannot use MSVC.
+
+1️⃣ Install MinGW-w64
+
+https://www.mingw-w64.org/
+
+Select:
+
+Architecture: x86_64
+
+Threads: posix
+
+Exception: seh
+
+Add bin folder to PATH.
+
+2️⃣ Compile
+g++ -std=gnu++17 dedupe.cpp -ltag -o dedupe.exe
+
+
+or
+
+g++ -std=gnu++17 flac_to_wav.cpp -lFLAC -o flac_to_wav.exe
+
+3️⃣ Run
+./dedupe.exe
+
+OPTIONAL: One-Click Build Task in VS Code
+
+Create .vscode/tasks.json:
+
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build C++ (MSVC)",
+      "type": "shell",
+      "command": "cl",
+      "args": ["/std:c++17", "dedupe.cpp"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}
+
+
+Press:
+
+Ctrl + Shift + B
+
+Best Practices (Strongly Recommended)
+
+Always test on a small folder first
+
+Add a dry-run mode before destructive scripts
+
+Keep backups until you verify results
+
+If you want:
+
+VS Code debugging setup (launch.json)
+
+vcpkg auto-integration
+
+A unified build script for all tools you’ve built
+
+Say the word and I’ll wire it cleanly.
