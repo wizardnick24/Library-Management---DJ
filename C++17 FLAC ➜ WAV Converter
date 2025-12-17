@@ -1,0 +1,145 @@
+#include <windows.h>
+#include <filesystem>
+#include <iostream>
+#include <vector>
+#include <FLAC/all.h>
+
+namespace fs = std::filesystem;
+
+// WAV writer
+struct WavWriter {
+    FILE* file = nullptr;
+    uint32_t sampleRate;
+    uint16_t channels;
+    uint16_t bitsPerSample;
+    uint32_t dataSize = 0;
+
+    void open(const fs::path& path, uint32_t sr, uint16_t ch, uint16_t bps) {
+        sampleRate = sr;
+        channels = ch;
+        bitsPerSample = bps;
+        file = _wfopen(path.c_str(), L"wb");
+        writeHeader();
+    }
+
+    void writeHeader() {
+        fwrite("RIFF", 1, 4, file);
+        uint32_t chunkSize = 0;
+        fwrite(&chunkSize, 4, 1, file);
+        fwrite("WAVEfmt ", 1, 8, file);
+
+        uint32_t subChunk1Size = 16;
+        uint16_t audioFormat = 1;
+        uint32_t byteRate = sampleRate * channels * bitsPerSample / 8;
+        uint16_t blockAlign = channels * bitsPerSample / 8;
+
+        fwrite(&subChunk1Size, 4, 1, file);
+        fwrite(&audioFormat, 2, 1, file);
+        fwrite(&channels, 2, 1, file);
+        fwrite(&sampleRate, 4, 1, file);
+        fwrite(&byteRate, 4, 1, file);
+        fwrite(&blockAlign, 2, 1, file);
+        fwrite(&bitsPerSample, 2, 1, file);
+        fwrite("data", 1, 4, file);
+        fwrite(&dataSize, 4, 1, file);
+    }
+
+    void writeSamples(const FLAC__int32* const buffer[], size_t samples) {
+        for (size_t i = 0; i < samples; i++) {
+            for (int ch = 0; ch < channels; ch++) {
+                int32_t s = buffer[ch][i];
+                fwrite(&s, bitsPerSample / 8, 1, file);
+                dataSize += bitsPerSample / 8;
+            }
+        }
+    }
+
+    void finalize() {
+        fseek(file, 4, SEEK_SET);
+        uint32_t riffSize = 36 + dataSize;
+        fwrite(&riffSize, 4, 1, file);
+        fseek(file, 40, SEEK_SET);
+        fwrite(&dataSize, 4, 1, file);
+        fclose(file);
+    }
+};
+
+struct DecoderContext {
+    WavWriter wav;
+};
+
+FLAC__StreamDecoderWriteStatus write_callback(
+    const FLAC__StreamDecoder*,
+    const FLAC__Frame* frame,
+    const FLAC__int32* const buffer[],
+    void* client_data)
+{
+    auto* ctx = static_cast<DecoderContext*>(client_data);
+    ctx->wav.writeSamples(buffer, frame->header.blocksize);
+    return FLAC__STREAM_DECODER_WRITE_STATUS_CONTINUE;
+}
+
+void metadata_callback(
+    const FLAC__StreamDecoder*,
+    const FLAC__StreamMetadata* metadata,
+    void* client_data)
+{
+    if (metadata->type == FLAC__METADATA_TYPE_STREAMINFO) {
+        auto* ctx = static_cast<DecoderContext*>(client_data);
+        ctx->wav.open(
+            "TEMP.wav",
+            metadata->data.stream_info.sample_rate,
+            metadata->data.stream_info.channels,
+            metadata->data.stream_info.bits_per_sample
+        );
+    }
+}
+
+void error_callback(const FLAC__StreamDecoder*, FLAC__StreamDecoderErrorStatus, void*) {}
+
+void convertFlac(const fs::path& flacPath) {
+    fs::path wavPath = flacPath;
+    wavPath.replace_extension(".wav");
+
+    DecoderContext ctx;
+    FLAC__StreamDecoder* decoder = FLAC__stream_decoder_new();
+
+    FLAC__stream_decoder_init_file(
+        decoder,
+        flacPath.string().c_str(),
+        write_callback,
+        metadata_callback,
+        error_callback,
+        &ctx
+    );
+
+    FLAC__stream_decoder_process_until_end_of_stream(decoder);
+    FLAC__stream_decoder_finish(decoder);
+    FLAC__stream_decoder_delete(decoder);
+
+    ctx.wav.finalize();
+    fs::rename("TEMP.wav", wavPath);
+}
+
+int wmain() {
+    DWORD mask = GetLogicalDrives();
+
+    for (wchar_t d = L'A'; d <= L'Z'; d++, mask >>= 1) {
+        if (!(mask & 1)) continue;
+
+        fs::path root = std::wstring{d} + L":\\";
+        try {
+            for (auto& p : fs::recursive_directory_iterator(
+                     root, fs::directory_options::skip_permission_denied))
+            {
+                if (p.path().extension() == ".flac") {
+                    try {
+                        convertFlac(p.path());
+                        std::wcout << L"Converted: " << p.path() << std::endl;
+                    } catch (...) {}
+                }
+            }
+        } catch (...) {}
+    }
+    return 0;
+}
